@@ -2,6 +2,7 @@ import SwiftUI
 import AudioToolbox
 import Combine
 import AVFoundation
+import UserNotifications
 
 // ---------------------------------------------------------
 // 2026/01/05: 複数プログラム並行管理版
@@ -999,6 +1000,8 @@ struct SessionDetailView: View {
         progress.startTime = now
         programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
 
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
+
         speak("トレーニングを開始します。頑張りましょう。")
     }
 
@@ -1118,6 +1121,34 @@ struct SessionDetailView: View {
         if m > 0 { speech += "\(m)分" }
         if s > 0 { speech += "\(s)秒" }
         speak(speech)
+
+        scheduleRestEndNotification(restTime: restTime)
+    }
+
+    private static let restNotificationID = "rest_end"
+
+    private func scheduleRestEndNotification(restTime: Int) {
+        let center = UNUserNotificationCenter.current()
+        center.removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
+
+        let nextSetNumber = completedSets + 1
+        let remainingSets = session.sets - completedSets - 1
+        let weightStr = String(format: "%.1f", calculatedWeight)
+        let body: String
+        if remainingSets > 0 {
+            body = "\(nextSetNumber)set目 \(weightStr)kg×\(session.reps) | 残り\(remainingSets)set"
+        } else {
+            body = "\(nextSetNumber)set目（最終セット） \(weightStr)kg×\(session.reps)"
+        }
+
+        let content = UNMutableNotificationContent()
+        content.title = "休憩終了"
+        content.body = body
+        content.sound = .default
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(restTime), repeats: false)
+        let request = UNNotificationRequest(identifier: Self.restNotificationID, content: content, trigger: trigger)
+        center.add(request)
     }
 
     private func resetProgress() {
@@ -1150,6 +1181,7 @@ struct SessionDetailView: View {
     private func skipRest() {
         isResting = false
         restStartTime = nil
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
         speak("休憩を終了します")
     }
 
@@ -1418,6 +1450,7 @@ struct SessionDetailView: View {
                     } else if timeRemaining == 0 {
                         isResting = false
                         restStartTime = nil
+                        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
                         speak("休憩終了です。次のセットを始めてください")
                     }
                 }
