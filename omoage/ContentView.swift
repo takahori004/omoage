@@ -1267,18 +1267,16 @@ struct SessionDetailView: View {
     private func startRestTimer() {
         var restTime = 180
 
-        // セッションに固定の休憩時間が設定されている場合（HPSなど）
-        if let fixedRestTime = session.restTime {
+        if useTimeLimit && timeLimit > 0, let start = sessionStartTime {
+            // 実際の経過時間ベースで動的再計算（ウジウジ時間も吸収）
+            let elapsed = Date().timeIntervalSince(start)
+            let setsLeft = Double(session.sets - completedSets)
+            let liftTimeRemaining = setsLeft * 45.0
+            let remainingBudget = timeLimit * 60.0 - elapsed - liftTimeRemaining
+            restTime = Int(max(30.0, remainingBudget / setsLeft))
+        } else if let fixedRestTime = session.restTime {
+            // セッションに固定の休憩時間が設定されている場合（HPSなど）
             restTime = fixedRestTime
-        } else if useTimeLimit && timeLimit > 0 {
-            let liftTimePerSet = 45.0
-            let totalLiftTime = Double(session.sets) * liftTimePerSet
-            let totalAvailableRestTime = (timeLimit * 60.0) - totalLiftTime
-            let numberOfRests = Double(session.sets - 1)
-            if numberOfRests > 0 {
-                let calculatedRest = totalAvailableRestTime / numberOfRests
-                restTime = Int(max(60.0, calculatedRest))
-            }
         } else {
             // スモロフJrの動的計算
             if session.week == 2 { restTime += 30 }
@@ -1506,7 +1504,11 @@ struct SessionDetailView: View {
                                     .font(.headline)
                                     .foregroundColor(.secondary)
                                 if useTimeLimit {
-                                    Text("※自動計算(短縮モード)").font(.caption).foregroundColor(.red)
+                                    let sessionLeft = max(0, timeLimit * 60 - totalElapsedTime)
+                                    Text("セッション残り: \(timeString(time: Int(sessionLeft)))")
+                                        .font(.caption)
+                                        .foregroundColor(sessionLeft < 60 ? .red : .orange)
+                                        .bold()
                                 }
                             }
 
