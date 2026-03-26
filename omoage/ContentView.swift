@@ -1482,7 +1482,11 @@ struct SessionDetailView: View {
                             resetAction: resetProgress,
                             sessionStartTime: sessionStartTime,
                             setCompletedTimes: setCompletedTimes,
-                            restDurations: actualRestDurations
+                            restDurations: actualRestDurations,
+                            programName: program.name,
+                            weight: calculatedWeight,
+                            sets: session.sets,
+                            reps: session.reps
                         )
                     } else if !isSessionStarted {
                         Button(action: {
@@ -1691,6 +1695,10 @@ struct FinishView: View {
     let sessionStartTime: Date?
     let setCompletedTimes: [Date]
     let restDurations: [Int]  // 実際の休憩時間（スキップ時は経過時間）
+    let programName: String
+    let weight: Double
+    let sets: Int
+    let reps: Int
 
     @Environment(\.presentationMode) var presentationMode
 
@@ -1700,6 +1708,32 @@ struct FinishView: View {
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter
+    }
+
+    private var shareText: String {
+        var lines: [String] = []
+        lines.append("🏋️ \(programName) 完了！")
+        lines.append(String(format: "%.1fkg × %drep × %dset", weight, reps, sets))
+
+        if let start = sessionStartTime, let end = finishedDate {
+            let total = end.timeIntervalSince(start)
+            let totalRest = restDurations.reduce(0, +)
+            lines.append("合計 \(durationString(total))（うち休憩 \(durationString(TimeInterval(totalRest)))）")
+        }
+
+        if !timeline.isEmpty {
+            lines.append("")
+            for item in timeline {
+                lines.append("セット\(item.setNumber): \(durationString(item.setDuration))")
+                if let rest = item.restSeconds {
+                    lines.append("  休憩: \(durationString(TimeInterval(rest)))")
+                }
+            }
+        }
+
+        lines.append("")
+        lines.append("#omoage #筋トレ")
+        return lines.joined(separator: "\n")
     }
 
     private func durationString(_ interval: TimeInterval) -> String {
@@ -1781,6 +1815,18 @@ struct FinishView: View {
 
             Text("お疲れ様でした。\nしっかり栄養を取って休みましょう。")
                 .multilineTextAlignment(.center)
+
+            ShareLink(item: shareText) {
+                Label("結果をシェア", systemImage: "square.and.arrow.up")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(12)
+            }
+            .padding(.horizontal)
+            .padding(.top, 10)
 
             Button("未完了に戻す") { resetAction() }
                 .foregroundColor(.red)
