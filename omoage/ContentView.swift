@@ -3,6 +3,7 @@ import AudioToolbox
 import Combine
 import AVFoundation
 import UserNotifications
+import UniformTypeIdentifiers
 
 // ---------------------------------------------------------
 // 2026/01/05: 複数プログラム並行管理版
@@ -54,6 +55,15 @@ struct SessionProgress: Codable {
         self.restStartTime = restStartTime
         self.restDuration = restDuration
     }
+}
+
+// MARK: - Export/Import Data Model
+
+struct ExportData: Codable {
+    let version: Int
+    let exportedAt: Date
+    let programs: [Program]
+    let sessionProgressMap: [String: SessionProgress] // key: "programUUID_sessionID"
 }
 
 // MARK: - Program Manager
@@ -199,6 +209,63 @@ class ProgramManager: ObservableObject {
 
         return latestDate
     }
+
+    // MARK: - Export / Import
+
+    func exportData() -> Data? {
+        var progressMap: [String: SessionProgress] = [:]
+        for program in programs {
+            let sessions = getSessions(for: program)
+            for session in sessions {
+                let progress = getSessionProgress(programID: program.id, sessionID: session.id)
+                if progress.completedSets > 0 || progress.isCompleted {
+                    let key = "\(program.id.uuidString)_\(session.id)"
+                    progressMap[key] = progress
+                }
+            }
+        }
+
+        let export = ExportData(
+            version: 1,
+            exportedAt: Date(),
+            programs: programs,
+            sessionProgressMap: progressMap
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        encoder.dateEncodingStrategy = .iso8601
+        return try? encoder.encode(export)
+    }
+
+    func importData(_ data: Data, merge: Bool) -> Bool {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+
+        guard let exportData = try? decoder.decode(ExportData.self, from: data) else {
+            return false
+        }
+
+        if !merge {
+            for program in programs {
+                deleteAllSessionProgress(for: program.id)
+            }
+            programs = exportData.programs
+        } else {
+            for program in exportData.programs where !programs.contains(where: { $0.id == program.id }) {
+                programs.append(program)
+            }
+        }
+        savePrograms()
+
+        let encoder = JSONEncoder()
+        for (key, progress) in exportData.sessionProgressMap {
+            if let encoded = try? encoder.encode(progress) {
+                UserDefaults.standard.set(encoded, forKey: progressKeyPrefix + key)
+            }
+        }
+        return true
+    }
 }
 
 // MARK: - Session Item (旧programの各要素)
@@ -339,6 +406,45 @@ class SpeechManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     }
 }
 
+// MARK: - Share Sheet
+
+struct ShareSheet: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: items, applicationActivities: nil)
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Document Picker
+
+struct DocumentPickerView: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(onPick: onPick) }
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [UTType.json])
+        picker.delegate = context.coordinator
+        picker.allowsMultipleSelection = false
+        return picker
+    }
+
+    func updateUIViewController(_ uiViewController: UIDocumentPickerViewController, context: Context) {}
+
+    class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        init(onPick: @escaping (URL) -> Void) { self.onPick = onPick }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else { return }
+            onPick(url)
+        }
+    }
+}
+
 // MARK: - Views
 
 /// エントリーポイント：プログラム一覧画面
@@ -346,6 +452,12 @@ struct ContentView: View {
     @StateObject private var programManager = ProgramManager()
     @StateObject private var speechManager = SpeechManager()
     @State private var showingCreateProgram = false
+    @State private var showingExportShare = false
+    @State private var exportURL: URL? = nil
+    @State private var showingImportPicker = false
+    @State private var pendingImportURL: URL? = nil
+    @State private var showingImportAlert = false
+    @State private var importError = false
 
     var body: some View {
         NavigationView {
@@ -359,13 +471,76 @@ struct ContentView: View {
                                 .font(.title2)
                         }
                     }
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Menu {
+                            Button(action: { doExport() }) {
+                                Label("エクスポート", systemImage: "square.and.arrow.up")
+                            }
+                            Button(action: { showingImportPicker = true }) {
+                                Label("インポート", systemImage: "square.and.arrow.down")
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                        }
+                    }
                 }
                 .sheet(isPresented: $showingCreateProgram) {
                     ProgramCreateView(programManager: programManager, isPresented: $showingCreateProgram)
                 }
+                .sheet(isPresented: $showingExportShare) {
+                    if let url = exportURL {
+                        ShareSheet(items: [url])
+                    }
+                }
+                .sheet(isPresented: $showingImportPicker) {
+                    DocumentPickerView { url in
+                        pendingImportURL = url
+                        showingImportPicker = false
+                        showingImportAlert = true
+                    }
+                }
+                .alert("インポート方法を選択", isPresented: $showingImportAlert) {
+                    Button("上書き（全て置き換え）", role: .destructive) {
+                        doImport(merge: false)
+                    }
+                    Button("追加（既存を保持）") {
+                        doImport(merge: true)
+                    }
+                    Button("キャンセル", role: .cancel) {}
+                } message: {
+                    Text("「上書き」は既存のデータを全て削除して置き換えます。「追加」は既存データを保持したまま新しいプログラムを追加します。")
+                }
+                .alert("インポート失敗", isPresented: $importError) {
+                    Button("OK", role: .cancel) {}
+                } message: {
+                    Text("ファイルの読み込みに失敗しました。正しいエクスポートファイルを選択してください。")
+                }
                 .onAppear {
                     UIApplication.shared.isIdleTimerDisabled = true
                 }
+        }
+    }
+
+    private func doExport() {
+        guard let data = programManager.exportData() else { return }
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("omoage_backup.json")
+        try? data.write(to: tempURL)
+        exportURL = tempURL
+        showingExportShare = true
+    }
+
+    private func doImport(merge: Bool) {
+        guard let url = pendingImportURL,
+              url.startAccessingSecurityScopedResource() else {
+            importError = true
+            return
+        }
+        defer { url.stopAccessingSecurityScopedResource() }
+
+        guard let data = try? Data(contentsOf: url),
+              programManager.importData(data, merge: merge) else {
+            importError = true
+            return
         }
     }
 }
