@@ -48,8 +48,9 @@ struct SessionProgress: Codable {
     // セットごとのタイムライン記録
     var setCompletedTimes: [Date]?
     var assignedRestDurations: [Int]?
+    var actualRestDurations: [Int]?  // 実際に休憩した時間（スキップ考慮）
 
-    init(completedSets: Int = 0, isCompleted: Bool = false, startTime: Date? = nil, endTime: Date? = nil, totalRest: TimeInterval = 0, isResting: Bool = false, restStartTime: Date? = nil, restDuration: Int = 0, setCompletedTimes: [Date]? = nil, assignedRestDurations: [Int]? = nil) {
+    init(completedSets: Int = 0, isCompleted: Bool = false, startTime: Date? = nil, endTime: Date? = nil, totalRest: TimeInterval = 0, isResting: Bool = false, restStartTime: Date? = nil, restDuration: Int = 0, setCompletedTimes: [Date]? = nil, assignedRestDurations: [Int]? = nil, actualRestDurations: [Int]? = nil) {
         self.completedSets = completedSets
         self.isCompleted = isCompleted
         self.startTime = startTime
@@ -60,6 +61,7 @@ struct SessionProgress: Codable {
         self.restDuration = restDuration
         self.setCompletedTimes = setCompletedTimes
         self.assignedRestDurations = assignedRestDurations
+        self.actualRestDurations = actualRestDurations
     }
 }
 
@@ -1137,6 +1139,7 @@ struct SessionDetailView: View {
     @State private var finishedDate: Date? = nil
     @State private var setCompletedTimes: [Date] = []
     @State private var assignedRestDurations: [Int] = []
+    @State private var actualRestDurations: [Int] = []
 
     @State private var isResting = false
     @State private var timeRemaining = 180
@@ -1207,6 +1210,7 @@ struct SessionDetailView: View {
             totalRestAccumulated = progress.totalRest
             setCompletedTimes = progress.setCompletedTimes ?? []
             assignedRestDurations = progress.assignedRestDurations ?? []
+            actualRestDurations = progress.actualRestDurations ?? []
             isSessionStarted = true
 
             // 休憩状態の復元
@@ -1351,6 +1355,7 @@ struct SessionDetailView: View {
         restStartTime = nil
         setCompletedTimes = []
         assignedRestDurations = []
+        actualRestDurations = []
 
         programManager.deleteSessionProgress(programID: program.id, sessionID: session.id)
     }
@@ -1369,6 +1374,12 @@ struct SessionDetailView: View {
     }
 
     private func skipRest() {
+        if let rs = restStartTime {
+            actualRestDurations.append(Int(Date().timeIntervalSince(rs)))
+            var progress = programManager.getSessionProgress(programID: program.id, sessionID: session.id)
+            progress.actualRestDurations = actualRestDurations
+            programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
+        }
         isResting = false
         restStartTime = nil
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
@@ -1471,7 +1482,7 @@ struct SessionDetailView: View {
                             resetAction: resetProgress,
                             sessionStartTime: sessionStartTime,
                             setCompletedTimes: setCompletedTimes,
-                            assignedRestDurations: assignedRestDurations
+                            restDurations: actualRestDurations
                         )
                     } else if !isSessionStarted {
                         Button(action: {
@@ -1648,6 +1659,10 @@ struct SessionDetailView: View {
                     } else if timeRemaining > 0 && timeRemaining < 10 {
                         speak("\(timeRemaining)")
                     } else if timeRemaining == 0 {
+                        actualRestDurations.append(currentRestDuration)
+                        var progress = programManager.getSessionProgress(programID: program.id, sessionID: session.id)
+                        progress.actualRestDurations = actualRestDurations
+                        programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
                         isResting = false
                         restStartTime = nil
                         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
@@ -1663,6 +1678,7 @@ struct SessionDetailView: View {
                 progress.isResting = isResting
                 progress.restStartTime = restStartTime
                 progress.restDuration = currentRestDuration
+                progress.actualRestDurations = actualRestDurations
                 programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
             }
         }
@@ -1674,7 +1690,7 @@ struct FinishView: View {
     let resetAction: () -> Void
     let sessionStartTime: Date?
     let setCompletedTimes: [Date]
-    let assignedRestDurations: [Int]
+    let restDurations: [Int]  // 実際の休憩時間（スキップ時は経過時間）
 
     @Environment(\.presentationMode) var presentationMode
 
@@ -1698,7 +1714,7 @@ struct FinishView: View {
         guard let start = sessionStartTime, !setCompletedTimes.isEmpty else { return [] }
         return setCompletedTimes.enumerated().map { i, completedAt in
             let prev = i == 0 ? start : setCompletedTimes[i - 1]
-            let rest = i < assignedRestDurations.count ? assignedRestDurations[i] : nil
+            let rest = i < restDurations.count ? restDurations[i] : nil
             return (setNumber: i + 1, setDuration: completedAt.timeIntervalSince(prev), restSeconds: rest)
         }
     }
