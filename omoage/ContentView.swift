@@ -406,18 +406,6 @@ class SpeechManager: NSObject, ObservableObject, AVSpeechSynthesizerDelegate {
     }
 }
 
-// MARK: - Share Sheet
-
-struct ShareSheet: UIViewControllerRepresentable {
-    let items: [Any]
-
-    func makeUIViewController(context: Context) -> UIActivityViewController {
-        UIActivityViewController(activityItems: items, applicationActivities: nil)
-    }
-
-    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
-}
-
 // MARK: - Document Picker
 
 struct DocumentPickerView: UIViewControllerRepresentable {
@@ -452,8 +440,6 @@ struct ContentView: View {
     @StateObject private var programManager = ProgramManager()
     @StateObject private var speechManager = SpeechManager()
     @State private var showingCreateProgram = false
-    @State private var showingExportShare = false
-    @State private var exportURL: URL? = nil
     @State private var showingImportPicker = false
     @State private var pendingImportURL: URL? = nil
     @State private var showingImportAlert = false
@@ -487,11 +473,6 @@ struct ContentView: View {
                 .sheet(isPresented: $showingCreateProgram) {
                     ProgramCreateView(programManager: programManager, isPresented: $showingCreateProgram)
                 }
-                .sheet(isPresented: $showingExportShare) {
-                    if let url = exportURL {
-                        ShareSheet(items: [url])
-                    }
-                }
                 .sheet(isPresented: $showingImportPicker) {
                     DocumentPickerView { url in
                         pendingImportURL = url
@@ -524,9 +505,25 @@ struct ContentView: View {
     private func doExport() {
         guard let data = programManager.exportData() else { return }
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("omoage_backup.json")
-        try? data.write(to: tempURL)
-        exportURL = tempURL
-        showingExportShare = true
+        guard (try? data.write(to: tempURL)) != nil else { return }
+
+        let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
+
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let rootVC = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return }
+
+        var topVC = rootVC
+        while let presented = topVC.presentedViewController {
+            topVC = presented
+        }
+
+        if let popover = activityVC.popoverPresentationController {
+            popover.sourceView = topVC.view
+            popover.sourceRect = CGRect(x: topVC.view.bounds.midX, y: 100, width: 0, height: 0)
+            popover.permittedArrowDirections = .up
+        }
+
+        topVC.present(activityVC, animated: true)
     }
 
     private func doImport(merge: Bool) {
