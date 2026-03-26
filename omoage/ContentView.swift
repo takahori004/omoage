@@ -1484,6 +1484,9 @@ struct SessionDetailView: View {
                             setCompletedTimes: setCompletedTimes,
                             restDurations: actualRestDurations,
                             programName: program.name,
+                            programType: program.programType,
+                            week: session.week,
+                            day: session.day,
                             weight: calculatedWeight,
                             sets: session.sets,
                             reps: session.reps
@@ -1689,6 +1692,107 @@ struct SessionDetailView: View {
     }
 }
 
+// MARK: - Result Card（シェア用カード）
+
+struct ResultCardView: View {
+    let programName: String
+    let programType: String
+    let week: Int
+    let day: Int
+    let weight: Double
+    let sets: Int
+    let reps: Int
+    let totalDuration: TimeInterval?
+    let totalRestDuration: TimeInterval
+    let timeline: [(setNumber: Int, setDuration: TimeInterval, restSeconds: Int?)]
+
+    private func dur(_ t: TimeInterval) -> String {
+        let s = max(0, Int(t))
+        let m = s / 60
+        let sec = s % 60
+        return String(format: "%d:%02d", m, sec)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // ヘッダー
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    Image(systemName: "figure.strengthtraining.traditional")
+                        .font(.caption)
+                    Text("omoage")
+                        .font(.caption).bold()
+                }
+                .foregroundColor(.white.opacity(0.8))
+
+                Text(programType)
+                    .font(.headline).bold().foregroundColor(.white)
+                Text(programName)
+                    .font(.title2).bold().foregroundColor(.white)
+                Text("Week\(week) - Day\(day)")
+                    .font(.subheadline).foregroundColor(.white.opacity(0.85))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color.blue)
+
+            VStack(alignment: .leading, spacing: 10) {
+                // 重量・セット
+                Text(String(format: "%.1fkg × %drep × %dset", weight, reps, sets))
+                    .font(.subheadline).foregroundColor(.secondary)
+
+                Divider()
+
+                // タイムライン
+                ForEach(timeline, id: \.setNumber) { item in
+                    HStack {
+                        Text("セット\(item.setNumber)")
+                            .frame(width: 64, alignment: .leading)
+                        Spacer()
+                        Text(dur(item.setDuration))
+                            .foregroundColor(.blue).bold()
+                    }
+                    .font(.system(.body, design: .monospaced))
+
+                    if let rest = item.restSeconds {
+                        HStack {
+                            Text("  └ 休憩")
+                                .frame(width: 64, alignment: .leading)
+                            Spacer()
+                            Text(dur(TimeInterval(rest)))
+                                .foregroundColor(.orange)
+                        }
+                        .font(.system(.caption, design: .monospaced))
+                    }
+                }
+
+                Divider()
+
+                // 合計
+                if let total = totalDuration {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("合計").font(.caption).foregroundColor(.secondary)
+                            Text(dur(total)).font(.title3).bold()
+                        }
+                        Spacer()
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text("うち休憩").font(.caption).foregroundColor(.secondary)
+                            Text(dur(totalRestDuration)).font(.title3).foregroundColor(.orange)
+                        }
+                    }
+                }
+            }
+            .padding(16)
+            .background(Color(UIColor.systemBackground))
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+        .frame(width: 320)
+    }
+}
+
 struct FinishView: View {
     let finishedDate: Date?
     let resetAction: () -> Void
@@ -1696,11 +1800,15 @@ struct FinishView: View {
     let setCompletedTimes: [Date]
     let restDurations: [Int]  // 実際の休憩時間（スキップ時は経過時間）
     let programName: String
+    let programType: String
+    let week: Int
+    let day: Int
     let weight: Double
     let sets: Int
     let reps: Int
 
     @Environment(\.presentationMode) var presentationMode
+    @State private var shareImage: UIImage? = nil
 
     private var dateFormatter: DateFormatter {
         let formatter = DateFormatter()
@@ -1712,7 +1820,8 @@ struct FinishView: View {
 
     private var shareText: String {
         var lines: [String] = []
-        lines.append("🏋️ \(programName) 完了！")
+        lines.append("🏋️ \(programType) - \(programName) 完了！")
+        lines.append("Week\(week) - Day\(day)")
         lines.append(String(format: "%.1fkg × %drep × %dset", weight, reps, sets))
 
         if let start = sessionStartTime, let end = finishedDate {
@@ -1734,6 +1843,47 @@ struct FinishView: View {
         lines.append("")
         lines.append("#omoage #筋トレ")
         return lines.joined(separator: "\n")
+    }
+
+    private var totalDuration: TimeInterval? {
+        guard let s = sessionStartTime, let e = finishedDate else { return nil }
+        return e.timeIntervalSince(s)
+    }
+    private var totalRestDuration: TimeInterval {
+        TimeInterval(restDurations.reduce(0, +))
+    }
+
+    @MainActor
+    private func generateShareImage() {
+        let card = ResultCardView(
+            programName: programName,
+            programType: programType,
+            week: week,
+            day: day,
+            weight: weight,
+            sets: sets,
+            reps: reps,
+            totalDuration: totalDuration,
+            totalRestDuration: totalRestDuration,
+            timeline: timeline
+        ).padding(20).background(Color(UIColor.systemGroupedBackground))
+        let renderer = ImageRenderer(content: card)
+        renderer.scale = 3.0
+        shareImage = renderer.uiImage
+    }
+
+    private func presentShareSheet() {
+        guard let image = shareImage else { return }
+        let av = UIActivityViewController(activityItems: [image], applicationActivities: nil)
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let root = windowScene.windows.first(where: { $0.isKeyWindow })?.rootViewController else { return }
+        var top = root
+        while let p = top.presentedViewController { top = p }
+        if let pop = av.popoverPresentationController {
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+        }
+        top.present(av, animated: true)
     }
 
     private func durationString(_ interval: TimeInterval) -> String {
@@ -1816,15 +1966,16 @@ struct FinishView: View {
             Text("お疲れ様でした。\nしっかり栄養を取って休みましょう。")
                 .multilineTextAlignment(.center)
 
-            ShareLink(item: shareText) {
+            Button(action: presentShareSheet) {
                 Label("結果をシェア", systemImage: "square.and.arrow.up")
                     .font(.headline)
                     .frame(maxWidth: .infinity)
                     .padding()
-                    .background(Color.blue)
+                    .background(shareImage != nil ? Color.blue : Color.gray)
                     .foregroundColor(.white)
                     .cornerRadius(12)
             }
+            .disabled(shareImage == nil)
             .padding(.horizontal)
             .padding(.top, 10)
 
@@ -1836,6 +1987,7 @@ struct FinishView: View {
                 .padding(.top, 10)
         }
         .transition(.scale)
+        .onAppear { generateShareImage() }
     }
 }
 
