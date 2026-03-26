@@ -1911,6 +1911,14 @@ struct FinishView: View {
                 .padding()
                 .background(Circle().fill(Color.yellow.opacity(0.2)))
 
+            Text(programType)
+                .font(.subheadline).bold()
+                .foregroundColor(.blue)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .background(Color.blue.opacity(0.1))
+                .cornerRadius(8)
+
             Text("トレーニング完了！")
                 .font(.title)
                 .bold()
