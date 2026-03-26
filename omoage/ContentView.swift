@@ -505,7 +505,10 @@ struct ContentView: View {
 
     private func doExport() {
         guard let data = programManager.exportData() else { return }
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("omoage_backup.json")
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyyMMdd"
+        let dateStr = formatter.string(from: Date())
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("omoage_backup_\(dateStr).json")
         guard (try? data.write(to: tempURL)) != nil else { return }
 
         let activityVC = UIActivityViewController(activityItems: [tempURL], applicationActivities: nil)
