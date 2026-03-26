@@ -45,8 +45,11 @@ struct SessionProgress: Codable {
     var isResting: Bool
     var restStartTime: Date?
     var restDuration: Int
+    // セットごとのタイムライン記録
+    var setCompletedTimes: [Date]?
+    var assignedRestDurations: [Int]?
 
-    init(completedSets: Int = 0, isCompleted: Bool = false, startTime: Date? = nil, endTime: Date? = nil, totalRest: TimeInterval = 0, isResting: Bool = false, restStartTime: Date? = nil, restDuration: Int = 0) {
+    init(completedSets: Int = 0, isCompleted: Bool = false, startTime: Date? = nil, endTime: Date? = nil, totalRest: TimeInterval = 0, isResting: Bool = false, restStartTime: Date? = nil, restDuration: Int = 0, setCompletedTimes: [Date]? = nil, assignedRestDurations: [Int]? = nil) {
         self.completedSets = completedSets
         self.isCompleted = isCompleted
         self.startTime = startTime
@@ -55,6 +58,8 @@ struct SessionProgress: Codable {
         self.isResting = isResting
         self.restStartTime = restStartTime
         self.restDuration = restDuration
+        self.setCompletedTimes = setCompletedTimes
+        self.assignedRestDurations = assignedRestDurations
     }
 }
 
@@ -1130,6 +1135,8 @@ struct SessionDetailView: View {
     @State private var completedSets = 0
     @State private var isFinished = false
     @State private var finishedDate: Date? = nil
+    @State private var setCompletedTimes: [Date] = []
+    @State private var assignedRestDurations: [Int] = []
 
     @State private var isResting = false
     @State private var timeRemaining = 180
@@ -1198,6 +1205,8 @@ struct SessionDetailView: View {
             completedSets = progress.completedSets
             sessionStartTime = progress.startTime
             totalRestAccumulated = progress.totalRest
+            setCompletedTimes = progress.setCompletedTimes ?? []
+            assignedRestDurations = progress.assignedRestDurations ?? []
             isSessionStarted = true
 
             // 休憩状態の復元
@@ -1231,16 +1240,21 @@ struct SessionDetailView: View {
     private func proceedSet() {
         if completedSets < session.sets {
             completedSets += 1
+            setCompletedTimes.append(Date())
 
             var progress = programManager.getSessionProgress(programID: program.id, sessionID: session.id)
             progress.completedSets = completedSets
             progress.totalRest = totalRestAccumulated
-            programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
+            progress.setCompletedTimes = setCompletedTimes
 
             if completedSets >= session.sets {
+                programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
                 finishSession()
             } else {
                 startRestTimer()
+                assignedRestDurations.append(currentRestDuration)
+                progress.assignedRestDurations = assignedRestDurations
+                programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
             }
         }
     }
@@ -1335,6 +1349,8 @@ struct SessionDetailView: View {
         totalElapsedTime = 0
         totalRestAccumulated = 0
         restStartTime = nil
+        setCompletedTimes = []
+        assignedRestDurations = []
 
         programManager.deleteSessionProgress(programID: program.id, sessionID: session.id)
     }
@@ -1450,7 +1466,13 @@ struct SessionDetailView: View {
                     Divider()
 
                     if isFinished {
-                        FinishView(finishedDate: finishedDate, resetAction: resetProgress)
+                        FinishView(
+                            finishedDate: finishedDate,
+                            resetAction: resetProgress,
+                            sessionStartTime: sessionStartTime,
+                            setCompletedTimes: setCompletedTimes,
+                            assignedRestDurations: assignedRestDurations
+                        )
                     } else if !isSessionStarted {
                         Button(action: {
                             withAnimation { startSession() }
@@ -1650,6 +1672,10 @@ struct SessionDetailView: View {
 struct FinishView: View {
     let finishedDate: Date?
     let resetAction: () -> Void
+    let sessionStartTime: Date?
+    let setCompletedTimes: [Date]
+    let assignedRestDurations: [Int]
+
     @Environment(\.presentationMode) var presentationMode
 
     private var dateFormatter: DateFormatter {
@@ -1658,6 +1684,23 @@ struct FinishView: View {
         formatter.dateStyle = .short
         formatter.timeStyle = .short
         return formatter
+    }
+
+    private func durationString(_ interval: TimeInterval) -> String {
+        let t = max(0, Int(interval))
+        let m = t / 60
+        let s = t % 60
+        return m > 0 ? "\(m)分\(s)秒" : "\(s)秒"
+    }
+
+    // セット番号・直前イベントからの経過時間・休憩設定のタプル配列
+    private var timeline: [(setNumber: Int, setDuration: TimeInterval, restSeconds: Int?)] {
+        guard let start = sessionStartTime, !setCompletedTimes.isEmpty else { return [] }
+        return setCompletedTimes.enumerated().map { i, completedAt in
+            let prev = i == 0 ? start : setCompletedTimes[i - 1]
+            let rest = i < assignedRestDurations.count ? assignedRestDurations[i] : nil
+            return (setNumber: i + 1, setDuration: completedAt.timeIntervalSince(prev), restSeconds: rest)
+        }
     }
 
     var body: some View {
@@ -1678,13 +1721,54 @@ struct FinishView: View {
                     .foregroundColor(.secondary)
             }
 
+            // タイムライン
+            if !timeline.isEmpty {
+                VStack(alignment: .leading, spacing: 0) {
+                    Text("タイムライン")
+                        .font(.headline)
+                        .padding(.bottom, 8)
+
+                    ForEach(timeline, id: \.setNumber) { item in
+                        // セット行
+                        HStack {
+                            Text("セット\(item.setNumber)")
+                                .font(.system(.body, design: .monospaced))
+                                .frame(width: 70, alignment: .leading)
+                            Spacer()
+                            Text(durationString(item.setDuration))
+                                .font(.system(.body, design: .monospaced))
+                                .foregroundColor(.blue)
+                        }
+                        .padding(.vertical, 4)
+
+                        // 休憩行（最終セット以外）
+                        if let rest = item.restSeconds {
+                            HStack {
+                                Text("  └ 休憩")
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 70, alignment: .leading)
+                                Spacer()
+                                Text(durationString(TimeInterval(rest)))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.orange)
+                            }
+                            .padding(.bottom, 2)
+                        }
+                    }
+                }
+                .padding()
+                .background(Color(UIColor.systemGray6))
+                .cornerRadius(12)
+                .padding(.horizontal)
+            }
+
             Text("お疲れ様でした。\nしっかり栄養を取って休みましょう。")
                 .multilineTextAlignment(.center)
-                .padding(.top)
 
             Button("未完了に戻す") { resetAction() }
                 .foregroundColor(.red)
-                .padding(.top, 40)
+                .padding(.top, 20)
 
             Button("一覧に戻る") { presentationMode.wrappedValue.dismiss() }
                 .padding(.top, 10)
