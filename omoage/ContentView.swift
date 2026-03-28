@@ -1417,7 +1417,7 @@ struct SessionDetailView: View {
         isResting = false
         restStartTime = nil
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
-        speak("休憩を終了します")
+        speakRestEnd()
     }
 
     var body: some View {
