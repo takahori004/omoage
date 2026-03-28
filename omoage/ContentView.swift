@@ -1283,7 +1283,17 @@ struct SessionDetailView: View {
     }
 
     private func startRestTimer() {
-        var restTime = 180
+        // まず「通常の休憩時間」を計算（時間制限なしの場合の値）
+        var normalRest = 180
+        if let fixedRestTime = session.restTime {
+            normalRest = fixedRestTime
+        } else {
+            if session.week == 2 { normalRest += 30 }
+            else if session.week == 3 { normalRest += 60 }
+            if completedSets >= (session.sets / 2) { normalRest += 60 }
+        }
+
+        var restTime = normalRest
 
         if useTimeLimit && timeLimit > 0, let start = sessionStartTime {
             // 実際の経過時間ベースで動的再計算（ウジウジ時間も吸収）
@@ -1291,15 +1301,9 @@ struct SessionDetailView: View {
             let setsLeft = Double(session.sets - completedSets)
             let liftTimeRemaining = setsLeft * 45.0
             let remainingBudget = timeLimit * 60.0 - elapsed - liftTimeRemaining
-            restTime = Int(max(30.0, remainingBudget / setsLeft))
-        } else if let fixedRestTime = session.restTime {
-            // セッションに固定の休憩時間が設定されている場合（HPSなど）
-            restTime = fixedRestTime
-        } else {
-            // スモロフJrの動的計算
-            if session.week == 2 { restTime += 30 }
-            else if session.week == 3 { restTime += 60 }
-            if completedSets >= (session.sets / 2) { restTime += 60 }
+            let adaptiveRest = Int(remainingBudget / setsLeft)
+            // 通常の休憩時間を超えないようにキャップ（早く終わっても異常に長くならない）
+            restTime = max(30, min(normalRest, adaptiveRest))
         }
 
         timeRemaining = restTime
