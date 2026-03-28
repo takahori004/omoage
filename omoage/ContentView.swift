@@ -1326,26 +1326,43 @@ struct SessionDetailView: View {
 
     private func scheduleRestEndNotification(restTime: Int) {
         let center = UNUserNotificationCenter.current()
-        center.removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
 
-        let nextSetNumber = completedSets + 1
-        let remainingSets = session.sets - completedSets - 1
-        let weightStr = String(format: "%.1f", calculatedWeight)
-        let body: String
-        if remainingSets > 0 {
-            body = "\(nextSetNumber)set目 \(weightStr)kg×\(session.reps) | 残り\(remainingSets)set"
-        } else {
-            body = "\(nextSetNumber)set目（最終セット） \(weightStr)kg×\(session.reps)"
+        // 権限確認してから追加
+        center.getNotificationSettings { settings in
+            guard settings.authorizationStatus == .authorized ||
+                  settings.authorizationStatus == .provisional else {
+                // 未許可なら再リクエスト
+                center.requestAuthorization(options: [.alert, .sound]) { _, _ in }
+                return
+            }
+
+            center.removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
+
+            let nextSetNumber = self.completedSets + 1
+            let remainingSets = self.session.sets - self.completedSets - 1
+            let weightStr = String(format: "%.1f", self.calculatedWeight)
+            let body: String
+            if remainingSets > 0 {
+                body = "\(nextSetNumber)set目 \(weightStr)kg×\(self.session.reps) | 残り\(remainingSets)set"
+            } else {
+                body = "\(nextSetNumber)set目（最終セット） \(weightStr)kg×\(self.session.reps)"
+            }
+
+            let content = UNMutableNotificationContent()
+            content.title = "休憩終了"
+            content.body = body
+            content.sound = .default
+
+            // timeInterval は 1 以上必須
+            let interval = TimeInterval(max(1, restTime))
+            let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+            let request = UNNotificationRequest(identifier: Self.restNotificationID, content: content, trigger: trigger)
+            center.add(request) { error in
+                if let error = error {
+                    print("通知スケジュールエラー: \(error.localizedDescription)")
+                }
+            }
         }
-
-        let content = UNMutableNotificationContent()
-        content.title = "休憩終了"
-        content.body = body
-        content.sound = .default
-
-        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: TimeInterval(restTime), repeats: false)
-        let request = UNNotificationRequest(identifier: Self.restNotificationID, content: content, trigger: trigger)
-        center.add(request)
     }
 
     private func resetProgress() {

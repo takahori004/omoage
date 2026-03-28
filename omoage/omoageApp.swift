@@ -22,6 +22,14 @@ struct omoageApp: App {
 class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { granted, error in
+            if let error = error {
+                print("通知権限エラー: \(error.localizedDescription)")
+            }
+            if !granted {
+                print("通知が拒否されています。設定アプリから許可してください。")
+            }
+        }
         return true
     }
 
