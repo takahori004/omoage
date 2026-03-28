@@ -1175,6 +1175,18 @@ struct SessionDetailView: View {
         speechManager.speak(text, isVoiceEnabled: isVoiceEnabled)
     }
 
+    private func speakRestEnd() {
+        let nextSet = completedSets + 1
+        let remaining = session.sets - completedSets
+        let message: String
+        if remaining == 1 {
+            message = "休憩終了です。次は最後のセットです。頑張りましょう。"
+        } else {
+            message = "休憩終了です。次は\(nextSet)セット目です。残り\(remaining)セット。頑張りましょう。"
+        }
+        speak(message)
+    }
+
     // MARK: - Session Control
 
     private func startSession() {
@@ -1227,7 +1239,7 @@ struct SessionDetailView: View {
                     // 休憩時間が既に終了している
                     isResting = false
                     restStartTime = nil
-                    speak("休憩終了です。次のセットを始めてください")
+                    speakRestEnd()
                 }
             }
         } else {
@@ -1666,7 +1678,7 @@ struct SessionDetailView: View {
                         timeRemaining = 0
                         isResting = false
                         restStartTime = nil
-                        speak("休憩終了です。次のセットを始めてください")
+                        speakRestEnd()
                     }
                 }
             }
@@ -1694,7 +1706,7 @@ struct SessionDetailView: View {
                         programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
                         isResting = false
                         restStartTime = nil
-                        speak("休憩終了です。次のセットを始めてください")
+                        speakRestEnd()
                     }
                 }
             }
