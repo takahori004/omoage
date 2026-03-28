@@ -1694,7 +1694,6 @@ struct SessionDetailView: View {
                         programManager.saveSessionProgress(progress, programID: program.id, sessionID: session.id)
                         isResting = false
                         restStartTime = nil
-                        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.restNotificationID])
                         speak("休憩終了です。次のセットを始めてください")
                     }
                 }
